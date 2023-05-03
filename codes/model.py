@@ -554,7 +554,6 @@ class KGEModel(nn.Module):
 
             samples = list(samples)
             samples = torch.LongTensor(samples)
-            print(samples.shape)
             if args.cuda:
                 samples = samples.cuda()
 
