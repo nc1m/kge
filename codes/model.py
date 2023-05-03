@@ -20,7 +20,14 @@ from torch.utils.data import DataLoader
 
 from dataloader import TestDataset
 
+from pathlib import Path
+import json
+import os
+import time
+from datetime import timedelta
 
+
+__similarity_cache__ = dict()
 
 class KGEModel(nn.Module):
     def __init__(self, model_name, nentity, nrelation, hidden_dim, gamma,
@@ -71,6 +78,7 @@ class KGEModel(nn.Module):
 
         if model_name == 'ComplEx' and (not double_entity_embedding or not double_relation_embedding):
             raise ValueError('ComplEx should use --double_entity_embedding and --double_relation_embedding')
+
 
     def forward(self, sample, mode='single'):
         '''
@@ -434,37 +442,119 @@ class KGEModel(nn.Module):
             for metric in logs[0].keys():
                 metrics[metric] = sum([log[metric] for log in logs])/len(logs)
 
-            # Compute aoc metrics
+            # Compute auc metrics
             # generate negative samples
+            # startTime = time.time()
+
+            if args.auc_path is None:
+                similarityPath = Path(args.data_path).parents[1].joinpath('yamanishi_similarity_data.json')
+                assert similarityPath.exists(), f'{similarityPath} does not exist use auc_path argument to specify the path to yamanishi_similarity_data.json'
+            else:
+                similarityPath = Path(args.auc_path)
+
+            with open(similarityPath, 'r') as jsonFp:
+                similarityData = json.load(jsonFp)
+
+            with open(os.path.join(args.data_path, 'entities.dict')) as fin:
+                entity2id = dict()
+                id2entity = dict()
+                for line in fin:
+                    eid, entity = line.strip().split('\t')
+                    entity2id[entity] = int(eid)
+                    id2entity[int(eid)] = entity
+
+
+            TARGET_TYPES = ['enzyme', 'ion_channel', 'gpcr', 'nuclear_receptor']
+            def get_entity_type(entity, similarityData):
+                """
+                Returns the type of the entity and if it's a drug.
+                """
+                isTarget = True
+                if entity.startswith('D'):
+                    isTarget = False
+                for eType in TARGET_TYPES:
+                    allEntities = similarityData[eType]['target' if isTarget else 'drug']['index']
+                    if entity in allEntities:
+                        return eType, isTarget
+                assert False, f'entity type not found'
+
+
+            def get_negative_sample_entity(entity2corrupt, rng, similarityData, args, entity2id):
+                """
+                Returns either a random entity emb id based on uniform/type based sampling
+                or a list of entity emb ids sorted by similarity.
+                """
+                if args.auc_sampling == 'uniform':
+                    return rng.integers(0, args.nentity)
+                elif args.auc_sampling == 'type':
+                    eType, isTarget = get_entity_type(entity2corrupt, similarityData)
+                    allEntities = similarityData[eType]['target' if isTarget else 'drug']['index']
+                    rEntity = rng.integers(0, len(allEntities))
+                    rEntity = allEntities[rEntity]
+                    return entity2id[rEntity]
+                elif args.auc_sampling == 'similarity':
+                    global __similarity_cache__
+                    if entity2corrupt in __similarity_cache__:
+                        return __similarity_cache__[entity2corrupt]
+                    else:
+                        eType, isTarget = get_entity_type(entity2corrupt, similarityData)
+                        index = similarityData[eType]['target' if isTarget else 'drug']['index']
+                        simMat = np.array(similarityData[eType]['target' if isTarget else 'drug']['similarity_matrix'])
+                        eIndex = index.index(entity2corrupt) # index from target as str to target index in similarty matrix
+                        eSimilarities = np.argsort(simMat[eIndex])
+                        eSimilarities = np.flip(eSimilarities)
+                        # TODO: Just store top k most similar entities?
+                        eSimilarities = eSimilarities[1:] # most similar entity is the entity itself => remove it
+                        candidateEntities = [index[x] for x in eSimilarities]
+                        candidateEntities = [entity2id[x] for x in candidateEntities]
+                        __similarity_cache__[entity2corrupt] = candidateEntities
+                        return candidateEntities
+
             all_true_triples = set(all_true_triples)
-            samples = []
+            samples = set()
             gt = []
             rng = np.random.default_rng(42)
             for head, relation, tail in test_triples:
-                samples.append((head, relation, tail))
+                samples.add((head, relation, tail))
                 gt.append(1)
-                # TODO?: add parameter for neagtive sample ratio for evaluation
+                # TODO: add parameter for neagtive sample ratio for evaluation?
                 for _ in range(5):
-                    # head corruption
-                    rEntity = rng.integers(0, args.nentity)
                     if rng.random() < 0.5:
                         headCorruption = True
-                    # tail corruption
                     else:
                         headCorruption = False
 
                     if headCorruption:
-                        while (rEntity, relation, tail) in all_true_triples or (rEntity, relation, tail) in samples:
-                            rEntity = rng.integers(0, args.nentity)
-                        samples.append((rEntity, relation, tail))
-                        gt.append(0)
-                    else:
-                        while (head, relation, rEntity) in all_true_triples or (head, relation, rEntity) in samples:
-                            rEntity = rng.integers(0, args.nentity)
-                        samples.append((head, relation, rEntity))
-                        gt.append(0)
+                        rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, args, entity2id)
+                        if args.auc_sampling in ['uniform', 'type']:
+                            while (rEntity, relation, tail) in all_true_triples or (rEntity, relation, tail) in samples:
+                                rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, args, entity2id)
+                            samples.add((rEntity, relation, tail))
+                            gt.append(0)
+                        elif args.auc_sampling == 'similarity':
+                            for eId in rEntity:
+                                if (eId, relation, tail) not in all_true_triples and (eId, relation, tail) not in samples:
+                                    samples.add((eId, relation, tail))
+                                    gt.append(0)
+                                    break
 
+                    else:
+                        rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, args, entity2id)
+                        if args.auc_sampling in ['uniform', 'type']:
+                            while (head, relation, rEntity) in all_true_triples or (head, relation, rEntity) in samples:
+                                rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, args, entity2id)
+                            samples.add((head, relation, rEntity))
+                            gt.append(0)
+                        elif args.auc_sampling == 'similarity':
+                            for eId in rEntity:
+                                if (head, relation, eId) not in all_true_triples and (head, relation, eId) not in samples:
+                                    samples.add((head , relation, eId))
+                                    gt.append(0)
+                                    break
+
+            samples = list(samples)
             samples = torch.LongTensor(samples)
+            print(samples.shape)
             if args.cuda:
                 samples = samples.cuda()
 
@@ -474,15 +564,14 @@ class KGEModel(nn.Module):
             y_true = np.array(gt)
 
             precision, recall, thresholds = precision_recall_curve(y_true, y_score)
-            # print(precision)
-            # print(recall.shape)
-            # print(thresholds.shape)
-            # print(thresholds)
+
             auc_pr = auc(recall, precision)
             # ignore last element of precision since: "Precision: Precision values such that element i is the precision of predictions with score >= thresholds[i] and the last element is 1."
+            # TODO: Error? computes value greater than 1
             auc_p = auc(thresholds, precision[:len(precision)-1])
 
             metrics['auc_pr'] = auc_pr
             metrics['auc_p'] = auc_p
+            # print(f'auc time: {str(timedelta(seconds=(time.time() - startTime)))}')
 
         return metrics

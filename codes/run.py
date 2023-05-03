@@ -74,6 +74,8 @@ def parse_args(args=None):
 
     parser.add_argument('--seed', type=int, default=None, help='Randomgenerator seed for reproducibility.')
     parser.add_argument('--offline', action='store_true', help='Set if you do not want to sync to wandb.')
+    parser.add_argument('--auc_sampling', action='choice', default='uniform', type=str, choices=['uniform', 'type', 'similarity'], help='Choose how the negative samples are sampled for the auc score metric.')
+    parser.add_argument('--auc_path', default=None, type=str, help='Path to the metainformation used for type/simiarity based sampling')
 
     return parser.parse_args(args)
 
