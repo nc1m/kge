@@ -567,10 +567,10 @@ class KGEModel(nn.Module):
             auc_pr = auc(recall, precision)
             # ignore last element of precision since: "Precision: Precision values such that element i is the precision of predictions with score >= thresholds[i] and the last element is 1."
             # TODO: Error? computes value greater than 1
-            auc_p = auc(thresholds, precision[:len(precision)-1])
+            # auc_p = auc(thresholds, precision[:len(precision)-1])
 
             metrics['auc_pr'] = auc_pr
-            metrics['auc_p'] = auc_p
+            # metrics['auc_p'] = auc_p
             # print(f'auc time: {str(timedelta(seconds=(time.time() - startTime)))}')
 
         return metrics
