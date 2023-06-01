@@ -205,6 +205,12 @@ def build_metadata(targetSimIndex, targetSimMat, drugSimIndex, drugSimMat):
     return metaInf
 
 
+def write_metadata(directory, metadata):
+    metadata_path = directory.joinpath('metadata.json')
+    with open(metadata_path, mode='w') as jsonFp:
+        json.dump(metadata, jsonFp)
+
+
 def main(args):
     if args.seed is not None:
         random.seed(args.seed)
@@ -217,6 +223,58 @@ def main(args):
     rawDir.mkdir(exist_ok=True)
     processedDir.mkdir(exist_ok=True)
 
+
+    # Create metainformation (target to type and similarity matrices)
+    metaInformation = dict()
+
+
+    rawEnzymeSimPath = download_url(ENZYME_TARGET_SIM_URL, rawDir)
+    targetSimIndex, targetSimMat = read_similarity_matrix(rawEnzymeSimPath, isTarget=True)
+    # print(len(simIndex))
+    # print(len(set(enzymes)))
+    rawEnzymeDrugSimPath = download_url(ENZYME_DRUG_SIM_URL, rawDir)
+    drugSimIndex, drugSimMat = read_similarity_matrix(rawEnzymeDrugSimPath, isTarget=False)
+    metaInformation['enzyme'] = build_metadata(targetSimIndex, targetSimMat, drugSimIndex, drugSimMat)
+
+
+    rawIonChSimPath = download_url(ION_CHANNEL_TARGET_SIM_URL, rawDir)
+    targetSimIndex, targetSimMat = read_similarity_matrix(rawIonChSimPath, isTarget=True)
+    # print(len(simIndex))
+    # print(len(set(ionChannels)))
+    rawIonChDrugSimPath = download_url(ION_CHANNEL_DRUG_SIM_URL, rawDir)
+    drugSimIndex, drugSimMat = read_similarity_matrix(rawIonChDrugSimPath, isTarget=False)
+    metaInformation['ion_channel'] = build_metadata(targetSimIndex, targetSimMat, drugSimIndex, drugSimMat)
+
+
+    rawGpcrSimPath = download_url(GPCR_TARGET_SIM_URL, rawDir)
+    targetSimIndex, targetSimMat = read_similarity_matrix(rawGpcrSimPath, isTarget=True)
+    # print(len(simIndex))
+    # print(len(set(gpcrs)))
+    rawGpcrDrugSimPath = download_url(GPCR_DRUG_SIM_URL, rawDir)
+    drugSimIndex, drugSimMat = read_similarity_matrix(rawGpcrDrugSimPath, isTarget=False)
+    metaInformation['gpcr'] = build_metadata(targetSimIndex, targetSimMat, drugSimIndex, drugSimMat)
+
+    rawNuclRecepSimPath = download_url(NUCLEAR_RECEPTOR_TARGET_SIM_URL, rawDir)
+    targetSimIndex, targetSimMat = read_similarity_matrix(rawNuclRecepSimPath, isTarget=True)
+    # print(len(simIndex))
+    # print(len(set(nuclReceptors)))
+    rawNuclRecepDrugSimPath = download_url(NUCLEAR_RECEPTOR_DRUG_SIM_URL, rawDir)
+    drugSimIndex, drugSimMat = read_similarity_matrix(rawNuclRecepDrugSimPath, isTarget=False)
+    metaInformation['nuclear_receptor'] = build_metadata(targetSimIndex, targetSimMat, drugSimIndex, drugSimMat)
+
+    # for key in metaInformation:
+    #     print(key)
+    #     for kkey in metaInformation[key]:
+    #         print(f'\t{kkey}')
+    #         for kkkey in metaInformation[key][kkey]:
+    #             print(f'\t\t{kkkey}')
+
+    # Instead of writing a single meta information file every dataset (not split) gets his own file to be able to append dataset specific ego_network information
+    # metaInfPath = processedDir.joinpath('yamanishi_similarity_data.json')
+    # with open(metaInfPath, mode='w') as jsonFp:
+    #     json.dump(metaInformation, jsonFp)
+
+    # Dataset creation
     relation2id = {YAMANISHI_REALTION:0}
 
     allDrugs = list()
@@ -226,6 +284,7 @@ def main(args):
     rawEnzymePath = download_url(ENZYME_INTERACTION_URL, rawDir)
     enzymeDataPath = processedDir.joinpath('enzyme')
     enzymeDataPath.mkdir(exist_ok=True)
+    write_metadata(enzymeDataPath, metaInformation)
 
     enzymes, enzymeDrugs, enzymeEdges = read_yamanishi_file(rawEnzymePath)
     allDrugs.extend(enzymeDrugs)
@@ -270,6 +329,7 @@ def main(args):
     rawIonChPath = download_url(ION_CHANNEL_INTERACTION_URL, rawDir)
     ionChDataPath = processedDir.joinpath('ion_channel')
     ionChDataPath.mkdir(exist_ok=True)
+    write_metadata(ionChDataPath, metaInformation)
 
     ionChannels, ionChDrugs, ionChEdges = read_yamanishi_file(rawIonChPath)
     allDrugs.extend(ionChDrugs)
@@ -313,6 +373,7 @@ def main(args):
     rawGpcrPath = download_url(GPCR_INTERACTION_URL, rawDir)
     gpcrDataPath = processedDir.joinpath('gpcr')
     gpcrDataPath.mkdir(exist_ok=True)
+    write_metadata(gpcrDataPath, metaInformation)
 
     gpcrs, gpcrDrugs, gpcrEdges = read_yamanishi_file(rawGpcrPath)
     allDrugs.extend(gpcrDrugs)
@@ -356,6 +417,7 @@ def main(args):
     rawNuclRecepPath = download_url(NUCLEAR_RECEPTOR_INTERACTION_URL, rawDir)
     nuclRecepDataPath = processedDir.joinpath('nuclear_receptor')
     nuclRecepDataPath.mkdir(exist_ok=True)
+    write_metadata(nuclRecepDataPath, metaInformation)
 
     nuclReceptors, nuclRecepDrugs, nuclRecepEdges = read_yamanishi_file(rawNuclRecepPath)
     allDrugs.extend(nuclRecepDrugs)
@@ -399,8 +461,11 @@ def main(args):
     # create create whole yamanishi and whole typed yamanishi  datasets
     yamDataPath = processedDir.joinpath('whole_yamanishi')
     yamDataPath.mkdir(exist_ok=True)
+    write_metadata(yamDataPath, metaInformation)
     typedDataPath = processedDir.joinpath('whole_yamanishi_typed')
     typedDataPath.mkdir(exist_ok=True)
+    write_metadata(typedDataPath, metaInformation)
+
 
     allTargets = enzymes + ionChannels + gpcrs + nuclReceptors
 
@@ -461,6 +526,7 @@ def main(args):
     # create k-fold cross validation split for edge type prediction
     typeSplitDataPath = processedDir.joinpath('type_split')
     typeSplitDataPath.mkdir(exist_ok=True)
+    write_metadata(typeSplitDataPath, metaInformation)
 
     # typedEntity2id
     # TypedRelation2id
@@ -510,57 +576,6 @@ def main(args):
         testPath = curDataDir.joinpath('test.txt')
         with open(testPath, mode='w') as fp:
             fp.writelines(testEdges)
-
-
-    # Create metainformation (target to type and similarity matrices)
-    metaInformation = dict()
-
-
-    rawEnzymeSimPath = download_url(ENZYME_TARGET_SIM_URL, rawDir)
-    targetSimIndex, targetSimMat = read_similarity_matrix(rawEnzymeSimPath, isTarget=True)
-    # print(len(simIndex))
-    # print(len(set(enzymes)))
-    rawEnzymeDrugSimPath = download_url(ENZYME_DRUG_SIM_URL, rawDir)
-    drugSimIndex, drugSimMat = read_similarity_matrix(rawEnzymeDrugSimPath, isTarget=False)
-    metaInformation['enzyme'] = build_metadata(targetSimIndex, targetSimMat, drugSimIndex, drugSimMat)
-
-
-    rawIonChSimPath = download_url(ION_CHANNEL_TARGET_SIM_URL, rawDir)
-    targetSimIndex, targetSimMat = read_similarity_matrix(rawIonChSimPath, isTarget=True)
-    # print(len(simIndex))
-    # print(len(set(ionChannels)))
-    rawIonChDrugSimPath = download_url(ION_CHANNEL_DRUG_SIM_URL, rawDir)
-    drugSimIndex, drugSimMat = read_similarity_matrix(rawIonChDrugSimPath, isTarget=False)
-    metaInformation['ion_channel'] = build_metadata(targetSimIndex, targetSimMat, drugSimIndex, drugSimMat)
-
-
-    rawGpcrSimPath = download_url(GPCR_TARGET_SIM_URL, rawDir)
-    targetSimIndex, targetSimMat = read_similarity_matrix(rawGpcrSimPath, isTarget=True)
-    # print(len(simIndex))
-    # print(len(set(gpcrs)))
-    rawGpcrDrugSimPath = download_url(GPCR_DRUG_SIM_URL, rawDir)
-    drugSimIndex, drugSimMat = read_similarity_matrix(rawGpcrDrugSimPath, isTarget=False)
-    metaInformation['gpcr'] = build_metadata(targetSimIndex, targetSimMat, drugSimIndex, drugSimMat)
-
-    rawNuclRecepSimPath = download_url(NUCLEAR_RECEPTOR_TARGET_SIM_URL, rawDir)
-    targetSimIndex, targetSimMat = read_similarity_matrix(rawNuclRecepSimPath, isTarget=True)
-    # print(len(simIndex))
-    # print(len(set(nuclReceptors)))
-    rawNuclRecepDrugSimPath = download_url(NUCLEAR_RECEPTOR_DRUG_SIM_URL, rawDir)
-    drugSimIndex, drugSimMat = read_similarity_matrix(rawNuclRecepDrugSimPath, isTarget=False)
-    metaInformation['nuclear_receptor'] = build_metadata(targetSimIndex, targetSimMat, drugSimIndex, drugSimMat)
-
-    # for key in metaInformation:
-    #     print(key)
-    #     for kkey in metaInformation[key]:
-    #         print(f'\t{kkey}')
-    #         for kkkey in metaInformation[key][kkey]:
-    #             print(f'\t\t{kkkey}')
-
-
-    metaInfPath = processedDir.joinpath('yamanishi_similarity_data.json')
-    with open(metaInfPath, mode='w') as jsonFp:
-        json.dump(metaInformation, jsonFp)
 
 
 if __name__ == '__main__':
