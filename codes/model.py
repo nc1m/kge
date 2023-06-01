@@ -444,7 +444,7 @@ class KGEModel(nn.Module):
 
             # Compute auc metrics
             # generate negative samples
-            # startTime = time.time()
+            startTime = time.time()
 
             if args.auc_path is None:
                 similarityPath = Path(args.data_path).parents[1].joinpath('yamanishi_similarity_data.json')
@@ -463,97 +463,9 @@ class KGEModel(nn.Module):
                     entity2id[entity] = int(eid)
                     id2entity[int(eid)] = entity
 
-
-            TARGET_TYPES = ['enzyme', 'ion_channel', 'gpcr', 'nuclear_receptor']
-            def get_entity_type(entity, similarityData):
-                """
-                Returns the type of the entity and if it's a drug.
-                """
-                isTarget = True
-                if entity.startswith('D'):
-                    isTarget = False
-                for eType in TARGET_TYPES:
-                    allEntities = similarityData[eType]['target' if isTarget else 'drug']['index']
-                    if entity in allEntities:
-                        return eType, isTarget
-                assert False, f'entity type not found'
-
-
-            def get_negative_sample_entity(entity2corrupt, rng, similarityData, args, entity2id):
-                """
-                Returns either a random entity emb id based on uniform/type based sampling
-                or a list of entity emb ids sorted by similarity.
-                """
-                if args.auc_sampling == 'uniform':
-                    return rng.integers(0, args.nentity)
-                elif args.auc_sampling == 'type':
-                    eType, isTarget = get_entity_type(entity2corrupt, similarityData)
-                    allEntities = similarityData[eType]['target' if isTarget else 'drug']['index']
-                    rEntity = rng.integers(0, len(allEntities))
-                    rEntity = allEntities[rEntity]
-                    return entity2id[rEntity]
-                elif args.auc_sampling == 'similarity':
-                    global __similarity_cache__
-                    if entity2corrupt in __similarity_cache__:
-                        return __similarity_cache__[entity2corrupt]
-                    else:
-                        eType, isTarget = get_entity_type(entity2corrupt, similarityData)
-                        index = similarityData[eType]['target' if isTarget else 'drug']['index']
-                        simMat = np.array(similarityData[eType]['target' if isTarget else 'drug']['similarity_matrix'])
-                        eIndex = index.index(entity2corrupt) # index from target as str to target index in similarty matrix
-                        eSimilarities = np.argsort(simMat[eIndex])
-                        eSimilarities = np.flip(eSimilarities)
-                        # TODO: Just store top k most similar entities?
-                        eSimilarities = eSimilarities[1:] # most similar entity is the entity itself => remove it
-                        candidateEntities = [index[x] for x in eSimilarities]
-                        candidateEntities = [entity2id[x] for x in candidateEntities]
-                        __similarity_cache__[entity2corrupt] = candidateEntities
-                        return candidateEntities
-
-            all_true_triples = set(all_true_triples)
-            samples = set()
-            gt = []
-            rng = np.random.default_rng(42)
-            for head, relation, tail in test_triples:
-                samples.add((head, relation, tail))
-                gt.append(1)
-                # TODO: add parameter for neagtive sample ratio for evaluation?
-                for _ in range(5):
-                    if rng.random() < 0.5:
-                        headCorruption = True
-                    else:
-                        headCorruption = False
-
-                    if headCorruption:
-                        rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, args, entity2id)
-                        if args.auc_sampling in ['uniform', 'type']:
-                            while (rEntity, relation, tail) in all_true_triples or (rEntity, relation, tail) in samples:
-                                rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, args, entity2id)
-                            samples.add((rEntity, relation, tail))
-                            gt.append(0)
-                        elif args.auc_sampling == 'similarity':
-                            for eId in rEntity:
-                                if (eId, relation, tail) not in all_true_triples and (eId, relation, tail) not in samples:
-                                    samples.add((eId, relation, tail))
-                                    gt.append(0)
-                                    break
-
-                    else:
-                        rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, args, entity2id)
-                        if args.auc_sampling in ['uniform', 'type']:
-                            while (head, relation, rEntity) in all_true_triples or (head, relation, rEntity) in samples:
-                                rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, args, entity2id)
-                            samples.add((head, relation, rEntity))
-                            gt.append(0)
-                        elif args.auc_sampling == 'similarity':
-                            for eId in rEntity:
-                                if (head, relation, eId) not in all_true_triples and (head, relation, eId) not in samples:
-                                    samples.add((head , relation, eId))
-                                    gt.append(0)
-                                    break
-
-            samples = list(samples)
+            samples, gt = append_negative_samples(test_triples, all_true_triples, similarityData, id2entity, entity2id, 5, args, seed=42)
             samples = torch.LongTensor(samples)
+
             if args.cuda:
                 samples = samples.cuda()
 
@@ -571,6 +483,99 @@ class KGEModel(nn.Module):
 
             metrics['auc_pr'] = auc_pr
             # metrics['auc_p'] = auc_p
-            # print(f'auc time: {str(timedelta(seconds=(time.time() - startTime)))}')
+            print(f'auc time: {str(timedelta(seconds=(time.time() - startTime)))}')
 
         return metrics
+
+
+
+TARGET_TYPES = ['enzyme', 'ion_channel', 'gpcr', 'nuclear_receptor']
+def get_entity_type(entity, similarityData):
+    """
+    Returns the type of the entity and if it's a drug.
+    """
+    isTarget = True
+    if entity.startswith('D'):
+        isTarget = False
+    for eType in TARGET_TYPES:
+        allEntities = similarityData[eType]['target' if isTarget else 'drug']['index']
+        if entity in allEntities:
+            return eType, isTarget
+    assert False, f'entity type not found'
+
+
+def get_negative_sample_entity(entity2corrupt, rng, similarityData, args, entity2id):
+    """
+    Returns either a random entity emb id based on uniform/type based sampling
+    or a list of entity emb ids sorted by similarity.
+    """
+    if args.auc_sampling == 'uniform':
+        return rng.integers(0, args.nentity)
+    elif args.auc_sampling == 'type':
+        eType, isTarget = get_entity_type(entity2corrupt, similarityData)
+        allEntities = similarityData[eType]['target' if isTarget else 'drug']['index']
+        rEntity = rng.integers(0, len(allEntities))
+        rEntity = allEntities[rEntity]
+        return entity2id[rEntity]
+    elif args.auc_sampling == 'similarity':
+        global __similarity_cache__
+        if entity2corrupt in __similarity_cache__:
+            return __similarity_cache__[entity2corrupt]
+        else:
+            eType, isTarget = get_entity_type(entity2corrupt, similarityData)
+            index = similarityData[eType]['target' if isTarget else 'drug']['index']
+            simMat = np.array(similarityData[eType]['target' if isTarget else 'drug']['similarity_matrix'])
+            eIndex = index.index(entity2corrupt) # index from target as str to target index in similarty matrix
+            eSimilarities = np.argsort(simMat[eIndex])
+            eSimilarities = np.flip(eSimilarities)
+            # TODO: Just store top k most similar entities?
+            eSimilarities = eSimilarities[1:] # most similar entity is the entity itself => remove it
+            candidateEntities = [index[x] for x in eSimilarities]
+            candidateEntities = [entity2id[x] for x in candidateEntities]
+            __similarity_cache__[entity2corrupt] = candidateEntities
+            return candidateEntities
+
+
+def append_negative_samples(positive_triples, all_true_triples, similarityData, id2entity, entity2id, k, args, seed=None):
+    all_true_triples = set(all_true_triples)
+    samples = []
+    gt = []
+    rng = np.random.default_rng(42)
+    for head, relation, tail in positive_triples:
+        samples.append((head, relation, tail))
+        gt.append(1)
+        # TODO: add parameter for neagtive sample ratio for evaluation?
+        for _ in range(k):
+            if rng.random() < 0.5:
+                headCorruption = True
+            else:
+                headCorruption = False
+
+            if headCorruption:
+                rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, args, entity2id)
+                if args.auc_sampling in ['uniform', 'type']:
+                    while (rEntity, relation, tail) in all_true_triples or (rEntity, relation, tail) in samples:
+                        rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, args, entity2id)
+                    samples.append((rEntity, relation, tail))
+                    gt.append(0)
+                elif args.auc_sampling == 'similarity':
+                    for eId in rEntity:
+                        if (eId, relation, tail) not in all_true_triples and (eId, relation, tail) not in samples:
+                            samples.append((eId, relation, tail))
+                            gt.append(0)
+                            break
+
+            else:
+                rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, args, entity2id)
+                if args.auc_sampling in ['uniform', 'type']:
+                    while (head, relation, rEntity) in all_true_triples or (head, relation, rEntity) in samples:
+                        rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, args, entity2id)
+                    samples.append((head, relation, rEntity))
+                    gt.append(0)
+                elif args.auc_sampling == 'similarity':
+                    for eId in rEntity:
+                        if (head, relation, eId) not in all_true_triples and (head, relation, eId) not in samples:
+                            samples.append((head , relation, eId))
+                            gt.append(0)
+                            break
+    return samples, gt
