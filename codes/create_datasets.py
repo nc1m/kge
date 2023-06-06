@@ -135,7 +135,7 @@ def create_type_edges(drugs, enzymes, ionChannels, gpcrs, nuclReceptors):
     typeEdges = []
     seenEntities = set()
     print(f'number of drugs: {len(drugs)}')
-    for e in set(drugs):
+    for e in list(dict.fromkeys(drugs)):
         if e not in seenEntities:
             typeEdges.append(f'{e}\t{TYPE_RELATION}\t{DRUG_TYPE}\n')
             seenEntities.add(e)
@@ -515,7 +515,9 @@ def main(args):
 
         trainPath = curTypedDataDir.joinpath('train.txt')
         with open(trainPath, mode='w') as fp:
-            fp.writelines(trainEdges + typeEdges)
+            trainTyped = trainEdges + typeEdges
+            random.shuffle(trainTyped)
+            fp.writelines(trainTyped)
         valPath = curTypedDataDir.joinpath('valid.txt')
         with open(valPath, mode='w') as fp:
             fp.writelines(valEdges)
