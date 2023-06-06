@@ -5,26 +5,25 @@ from __future__ import division
 from __future__ import print_function
 
 import logging
+from pathlib import Path
+import json
+import os
+import time
+from datetime import timedelta
 
 import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 from sklearn.metrics import average_precision_score
 from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import auc
 
-from torch.utils.data import DataLoader
-
 from dataloader import TestDataset
-
-from pathlib import Path
-import json
-import os
-import time
-from datetime import timedelta
+import const
 
 
 __similarity_cache__ = dict()
@@ -447,7 +446,7 @@ class KGEModel(nn.Module):
             startTime = time.time()
 
             if args.auc_path is None:
-                similarityPath = Path(args.data_path).parents[1].joinpath('yamanishi_similarity_data.json')
+                similarityPath = Path(args.data_path).parents[0].joinpath('metadata.json')
                 assert similarityPath.exists(), f'{similarityPath} does not exist use auc_path argument to specify the path to yamanishi_similarity_data.json'
             else:
                 similarityPath = Path(args.auc_path)
@@ -463,7 +462,7 @@ class KGEModel(nn.Module):
                     entity2id[entity] = int(eid)
                     id2entity[int(eid)] = entity
 
-            samples, gt = append_negative_samples(test_triples, all_true_triples, similarityData, id2entity, entity2id, 5, args, seed=42)
+            samples, gt = append_negative_samples(test_triples, all_true_triples, similarityData, id2entity, entity2id, 5, args.auc_sampling, seed=42)
             samples = torch.LongTensor(samples)
 
             if args.cuda:
@@ -504,20 +503,21 @@ def get_entity_type(entity, similarityData):
     assert False, f'entity type not found'
 
 
-def get_negative_sample_entity(entity2corrupt, rng, similarityData, args, entity2id):
+def get_negative_sample_entity(entity2corrupt, rng, similarityData, negative_sampling_method, entity2id):
     """
     Returns either a random entity emb id based on uniform/type based sampling
-    or a list of entity emb ids sorted by similarity.
+    or a list of entity emb ids sorted by similarity
+    or a list of entity emb ids sorted by ego network similarity
     """
-    if args.auc_sampling == 'uniform':
-        return rng.integers(0, args.nentity)
-    elif args.auc_sampling == 'type':
+    if negative_sampling_method == const.NEGATIVE_SAMPLING_METHOD_UNIFORM:
+        return rng.integers(0, max(entity2id.values()))
+    elif negative_sampling_method == const.NEGATIVE_SAMPLING_METHOD_TYPE:
         eType, isTarget = get_entity_type(entity2corrupt, similarityData)
         allEntities = similarityData[eType]['target' if isTarget else 'drug']['index']
         rEntity = rng.integers(0, len(allEntities))
         rEntity = allEntities[rEntity]
         return entity2id[rEntity]
-    elif args.auc_sampling == 'similarity':
+    elif negative_sampling_method == const.NEGATIVE_SAMPLING_METHOD_SIMILARITY:
         global __similarity_cache__
         if entity2corrupt in __similarity_cache__:
             return __similarity_cache__[entity2corrupt]
@@ -534,9 +534,15 @@ def get_negative_sample_entity(entity2corrupt, rng, similarityData, args, entity
             candidateEntities = [entity2id[x] for x in candidateEntities]
             __similarity_cache__[entity2corrupt] = candidateEntities
             return candidateEntities
+    elif negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_COUNT, const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_JACCARD]:
+        # Get list of ego network candidates with their similarity score
+        candidates = similarityData['ego_networks'][negative_sampling_method][str(entity2id[entity2corrupt])] # TODO: Through the json encoding decoding the dictionary keys are strings.
+        # Remove similarity score
+        candidates = [x[0] for x in candidates]
+        return candidates
 
 
-def append_negative_samples(positive_triples, all_true_triples, similarityData, id2entity, entity2id, k, args, seed=None):
+def append_negative_samples(positive_triples, all_true_triples, similarityData, id2entity, entity2id, k, negative_sampling_method, seed=None):
     all_true_triples = set(all_true_triples)
     samples = []
     gt = []
@@ -552,13 +558,13 @@ def append_negative_samples(positive_triples, all_true_triples, similarityData, 
                 headCorruption = False
 
             if headCorruption:
-                rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, args, entity2id)
-                if args.auc_sampling in ['uniform', 'type']:
+                rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, negative_sampling_method, entity2id)
+                if negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_UNIFORM, const.NEGATIVE_SAMPLING_METHOD_TYPE]:
                     while (rEntity, relation, tail) in all_true_triples or (rEntity, relation, tail) in samples:
-                        rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, args, entity2id)
+                        rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, negative_sampling_method, entity2id)
                     samples.append((rEntity, relation, tail))
                     gt.append(0)
-                elif args.auc_sampling == 'similarity':
+                elif negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_SIMILARITY, const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_COUNT, const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_JACCARD]:
                     for eId in rEntity:
                         if (eId, relation, tail) not in all_true_triples and (eId, relation, tail) not in samples:
                             samples.append((eId, relation, tail))
@@ -566,13 +572,13 @@ def append_negative_samples(positive_triples, all_true_triples, similarityData, 
                             break
 
             else:
-                rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, args, entity2id)
-                if args.auc_sampling in ['uniform', 'type']:
+                rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, negative_sampling_method, entity2id)
+                if negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_UNIFORM, const.NEGATIVE_SAMPLING_METHOD_TYPE]:
                     while (head, relation, rEntity) in all_true_triples or (head, relation, rEntity) in samples:
-                        rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, args, entity2id)
+                        rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, negative_sampling_method, entity2id)
                     samples.append((head, relation, rEntity))
                     gt.append(0)
-                elif args.auc_sampling == 'similarity':
+                elif negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_SIMILARITY, const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_COUNT, const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_JACCARD]:
                     for eId in rEntity:
                         if (head, relation, eId) not in all_true_triples and (head, relation, eId) not in samples:
                             samples.append((head , relation, eId))

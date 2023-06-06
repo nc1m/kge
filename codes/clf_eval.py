@@ -9,40 +9,30 @@ import json
 import logging
 import os
 import datetime
+import time
+from pathlib import Path
 
 import numpy as np
 import torch
-
-from torch.utils.data import DataLoader
-
-from model import KGEModel
-
-from dataloader import TrainDataset
-from dataloader import BidirectionalOneShotIterator
-
-import time
-from datetime import timedelta
-from pathlib import Path
-
 import wandb
 from sklearn.metrics import roc_curve
 from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import auc
 from sklearn.metrics import RocCurveDisplay
 from sklearn.metrics import PrecisionRecallDisplay
-from sklearn.metrics import roc_auc_score
+# from sklearn.metrics import roc_auc_score
 from sklearn.metrics import average_precision_score
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
-import xgboost as xgb
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
-
-import matplotlib.pyplot as plt
+import xgboost as xgb
 
 from model import append_negative_samples
+from model import KGEModel
+import const
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(
@@ -57,7 +47,7 @@ def parse_args(args=None):
 
     parser.add_argument('--seed', type=int, default=None, help='Randomgenerator seed for reproducibility.')
     parser.add_argument('--offline', action='store_true', help='Set if you do not want to sync to wandb.')
-    parser.add_argument('--auc_sampling', default='uniform', type=str, choices=['uniform', 'type', 'similarity'], help='Choose how the negative samples are sampled for the auc score metric.') # difficult to rename, hardcoded in append_negative_samples()
+    parser.add_argument('--auc_sampling', default='uniform', type=str, choices=const.NEGATIVE_SAMPLING_METHODS, help='Choose how the negative samples are sampled for the auc score metric.') # difficult to rename, hardcoded in append_negative_samples()
     parser.add_argument('--auc_path', default=None, type=str, help='Path to the metainformation used for type/simiarity based sampling')
     parser.add_argument('-v','--verbose', action='count', default=0, help='Choose verbosity levels, based on how often the argument is given.')
     parser.add_argument('--eval_neg_sample_ratio', type=int, default=5, help='Numbe of negative samples per positive validation/test sample.')
@@ -138,8 +128,7 @@ def main(args):
         torch.manual_seed(args.seed)
         torch.cuda.manual_seed(args.seed)
 
-    startTime = time.time()
-
+    start_datetime = datetime.datetime.now()
 
     # Get model args from saved config
     with open(os.path.join(args.model_path, 'config.json'), 'r') as fjson:
@@ -157,6 +146,8 @@ def main(args):
     args.regularization = argparse_dict['regularization']
     args.negative_sample_size = argparse_dict['negative_sample_size']
     args.max_steps = argparse_dict['max_steps']
+
+    print(args)
 
     # Update wandb config based on loaded arguments
     wandb.config.update({'model': args.model,
@@ -247,8 +238,8 @@ def main(args):
 
     # Load similarity data
     if args.auc_path is None:
-        similarityPath = Path(args.data_path).parents[1].joinpath('yamanishi_similarity_data.json')
-        assert similarityPath.exists(), f'{similarityPath} does not exist use auc_path argument to specify the path to yamanishi_similarity_data.json'
+        similarityPath = Path(args.data_path).parents[0].joinpath('metadata.json')
+        assert similarityPath.exists(), f'{similarityPath} does not exist use auc_path argument to specify the path to metadata.json'
     else:
         similarityPath = Path(args.auc_path)
 
@@ -256,7 +247,7 @@ def main(args):
         similarityData = json.load(jsonFp)
 
     # Add negative samples to validation data
-    samplesValid, gtValid = append_negative_samples(valid_triples, all_true_triples, similarityData, id2entity, entity2id, args.eval_neg_sample_ratio, args, seed=42)
+    samplesValid, gtValid = append_negative_samples(valid_triples, all_true_triples, similarityData, id2entity, entity2id, args.eval_neg_sample_ratio, args.auc_sampling, seed=42)
     samplesValid = torch.LongTensor(samplesValid)
 
     if args.cuda:
@@ -288,12 +279,15 @@ def main(args):
 
 
     # Create classifier train data
-    samplesTrain, gtTrain = append_negative_samples(train_triples, all_true_triples, similarityData, id2entity, entity2id, args.eval_neg_sample_ratio, args, seed=args.seed)
+    samplesTrain, gtTrain = append_negative_samples(train_triples, all_true_triples, similarityData, id2entity, entity2id, args.eval_neg_sample_ratio, args.auc_sampling, seed=args.seed)
     samplesTrain = build_classifier_dataset(kge_model, samplesTrain)
     gtTrain = np.array(gtTrain) # TODO: needed?
 
+    print(f'Training classifiers with {gtTrain.shape[0]}/{len(train_triples)*(args.eval_neg_sample_ratio+1)} samples.')
+
     # Add embeddings to validation data
     samplesValid = build_classifier_dataset(kge_model, samplesValid)
+    # TODO: shuffle training samples?
 
     # Scale data
     if args.scale_emb:
