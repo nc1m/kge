@@ -61,6 +61,8 @@ def download_url(url, dirPath):
 
 def read_yamanishi_file(filePath):
     """Read the yamanishi file and returns a list of targets, drugs and edges.
+
+    Note: List can and should contain duplicates to find rare entities.
     """
     targets = list()
     targetDrugs = list()
