@@ -122,7 +122,7 @@ def main(args):
     rawNuclRecepPath = download_url(NUCLEAR_RECEPTOR_URL, rawDir)
 
     enzymes, enzyme_drugs, enzyme_interactions = read_yamanishi_file(rawEnzymePath)
-    # remove duplicates (seed read_yamanishi_file() doc string) while preserving order
+    # remove duplicates (see read_yamanishi_file() doc string) while preserving order
     enzymes = list(dict.fromkeys(enzymes))
     enzyme_drugs = list(dict.fromkeys(enzyme_drugs))
     enzyme_interactions = list(dict.fromkeys(enzyme_interactions))
@@ -131,9 +131,6 @@ def main(args):
     yamanishi_interactions.extend(enzyme_interactions)
 
     ion_channels, ion_channel_drugs, ion_channel_interactions = read_yamanishi_file(rawIonChPath)
-    ion_channels = list(dict.fromkeys(ion_channels))
-    ion_channel_drugs = list(dict.fromkeys(ion_channel_drugs))
-    ion_channel_interactions = list(dict.fromkeys(    ion_channel_interactions))
     ion_channels = list(dict.fromkeys(ion_channels))
     ion_channel_drugs = list(dict.fromkeys(ion_channel_drugs))
     ion_channel_interactions = list(dict.fromkeys(ion_channel_interactions))
