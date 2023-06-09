@@ -49,6 +49,9 @@ def parse_args(args=None):
     parser.add_argument('--offline', action='store_true', help='Set if you do not want to sync to wandb.')
     parser.add_argument('--auc_sampling', default='uniform', type=str, choices=const.NEGATIVE_SAMPLING_METHODS, help='Choose how the negative samples are sampled for the auc score metric.') # difficult to rename, hardcoded in append_negative_samples()
     parser.add_argument('--auc_path', default=None, type=str, help='Path to the metainformation used for type/simiarity based sampling')
+
+    parser.add_argument('--kegg', action='store_true', help='Set to perform evaluation on novel kegg interactions between yamanishi entities.')
+    parser.add_argument('--kegg_path', default=None, type=Path, help='Use custome interaction .txt')
     parser.add_argument('-v','--verbose', action='count', default=0, help='Choose verbosity levels, based on how often the argument is given.')
     parser.add_argument('--eval_neg_sample_ratio', type=int, default=5, help='Numbe of negative samples per positive validation/test sample.')
     parser.add_argument('--scale_emb', action='store_true', help='Scale (using standard scalar) the embeddings before handing them to the classifiers.')
@@ -160,7 +163,8 @@ def main(args):
                          'negative_sample_size': args.negative_sample_size,
                          'max_steps': args.max_steps,
                          'eval_neg_sample_ratio': args.eval_neg_sample_ratio,
-                         'scale_emb': args.scale_emb})
+                         'scale_emb': args.scale_emb,
+                         'kegg': args.kegg})
 
     # Config logging
     set_logger(args)
@@ -203,10 +207,18 @@ def main(args):
 
     train_triples = read_triple(os.path.join(args.data_path, 'train.txt'), entity2id, relation2id)
     logging.info('#train: %d' % len(train_triples))
-    valid_triples = read_triple(os.path.join(args.data_path, 'valid.txt'), entity2id, relation2id)
+    if args.kegg:
+        if args.kegg_path:
+            valid_path = args.kegg_path
+        else:
+            valid_path = Path(args.data_path).parents[0].joinpath('kegg_interactions.txt')
+        valid_triples = read_triple(valid_path, entity2id, relation2id)
+    else:
+        valid_triples = read_triple(os.path.join(args.data_path, 'valid.txt'), entity2id, relation2id)
     logging.info('#valid: %d' % len(valid_triples))
     test_triples = read_triple(os.path.join(args.data_path, 'test.txt'), entity2id, relation2id)
     logging.info('#test: %d' % len(test_triples))
+
 
     # All true triples
     all_true_triples = train_triples + valid_triples + test_triples
