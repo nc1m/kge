@@ -215,8 +215,6 @@ def main(args):
         args.regions = regions
 
     nentity = len(entity2id)
-    print(nentity)
-    exit()
     nrelation = len(relation2id)
 
     args.nentity = nentity
