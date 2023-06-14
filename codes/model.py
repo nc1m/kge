@@ -10,6 +10,7 @@ import json
 import os
 import time
 from datetime import timedelta
+import datetime
 
 import numpy as np
 
@@ -20,6 +21,7 @@ from torch.utils.data import DataLoader
 
 from sklearn.metrics import average_precision_score
 from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import roc_curve
 from sklearn.metrics import auc
 
 from dataloader import TestDataset
@@ -268,7 +270,9 @@ class KGEModel(nn.Module):
 
         optimizer.zero_grad()
 
+        test_time = datetime.datetime.now()
         positive_sample, negative_sample, subsampling_weight, mode = next(train_iterator)
+        # print(f'Sample retrieval time: {datetime.datetime.now() - test_time}')
 
         if args.cuda:
             positive_sample = positive_sample.cuda()
@@ -445,11 +449,11 @@ class KGEModel(nn.Module):
             # generate negative samples
             startTime = time.time()
 
-            if args.auc_path is None:
+            if args.metadata_path is None:
                 similarityPath = Path(args.data_path).parents[0].joinpath('metadata.json')
-                assert similarityPath.exists(), f'{similarityPath} does not exist use auc_path argument to specify the path to yamanishi_similarity_data.json'
+                assert similarityPath.exists(), f'{similarityPath} does not exist use metadata_path argument to specify the path to yamanishi_similarity_data.json'
             else:
-                similarityPath = Path(args.auc_path)
+                similarityPath = Path(args.metadata_path)
 
             with open(similarityPath, 'r') as jsonFp:
                 similarityData = json.load(jsonFp)
@@ -462,7 +466,7 @@ class KGEModel(nn.Module):
                     entity2id[entity] = int(eid)
                     id2entity[int(eid)] = entity
 
-            samples, gt = append_negative_samples(test_triples, all_true_triples, similarityData, id2entity, entity2id, 5, args.auc_sampling, seed=42)
+            samples, gt = append_negative_samples(test_triples, all_true_triples, similarityData, id2entity, entity2id, 5, 'uniform', 42)#args.neg_sampling_method, seed=42)
             samples = torch.LongTensor(samples)
 
             if args.cuda:
@@ -479,8 +483,13 @@ class KGEModel(nn.Module):
             # ignore last element of precision since: "Precision: Precision values such that element i is the precision of predictions with score >= thresholds[i] and the last element is 1."
             # TODO: Error? computes value greater than 1
             # auc_p = auc(thresholds, precision[:len(precision)-1])
-
             metrics['auc_pr'] = auc_pr
+
+            fpr, tpr, thresholds = roc_curve(y_true, y_score)
+            roc_auc = auc(fpr, tpr)
+            metrics['auc_roc'] = roc_auc
+            avg_precision = average_precision_score(y_true, y_score)
+            metrics['avg_precision'] = avg_precision
             # metrics['auc_p'] = auc_p
             print(f'auc time: {str(timedelta(seconds=(time.time() - startTime)))}')
 

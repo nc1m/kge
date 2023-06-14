@@ -23,6 +23,9 @@ from dataloader import BidirectionalOneShotIterator
 import wandb
 import time
 from datetime import timedelta
+import datetime
+from pathlib import Path
+import const
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(
@@ -74,8 +77,8 @@ def parse_args(args=None):
 
     parser.add_argument('--seed', type=int, default=None, help='Randomgenerator seed for reproducibility.')
     parser.add_argument('--offline', action='store_true', help='Set if you do not want to sync to wandb.')
-    parser.add_argument('--auc_sampling', default='uniform', type=str, choices=['uniform', 'type', 'similarity'], help='Choose how the negative samples are sampled for the auc score metric.')
-    parser.add_argument('--auc_path', default=None, type=str, help='Path to the metainformation used for type/simiarity based sampling')
+    parser.add_argument('--neg_sampling_method', default='uniform', type=str, choices=const.NEGATIVE_SAMPLING_METHODS, help='Choose how the negative samples are sampled for the auc score metric.')
+    parser.add_argument('--metadata_path', default=None, type=str, help='Path to the metainformation used for type/simiarity based sampling')
 
     return parser.parse_args(args)
 
@@ -214,11 +217,28 @@ def main(args):
                 regions.append(entity2id[region])
         args.regions = regions
 
+    if not wandb.config.as_dict():
+        print('Upadting wandb config with args.')
+        wandb.config.update(args)
+
     nentity = len(entity2id)
     nrelation = len(relation2id)
 
     args.nentity = nentity
     args.nrelation = nrelation
+
+    # Load ego network data
+    if args.neg_sampling_method in ['jaccard', 'count']:
+        if args.metadata_path is None:
+            metadata_path = Path(args.data_path).parents[0].joinpath('metadata.json')
+            assert metadata_path.exists(), f'{metadata_path} does not exist use metadata_path argument to specify the path to yamanishi_similarity_data.json'
+        else:
+            metadata_path = Path(args.metadata_path)
+        with open(metadata_path, 'r') as jsonFp:
+            meta_data = json.load(jsonFp)
+        ego_network_data = meta_data['ego_networks'][args.neg_sampling_method]
+    else:
+        ego_network_data = None
 
     logging.info('Model: %s' % args.model)
     logging.info('Data Path: %s' % args.data_path)
@@ -255,7 +275,7 @@ def main(args):
     if args.do_train:
         # Set training dataloader iterator
         train_dataloader_head = DataLoader(
-            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'head-batch'),
+            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'head-batch', ego_network_data),
             batch_size=args.batch_size,
             shuffle=True,
             num_workers=max(1, args.cpu_num//2),
@@ -263,7 +283,7 @@ def main(args):
         )
 
         train_dataloader_tail = DataLoader(
-            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'tail-batch'),
+            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'tail-batch', ego_network_data),
             batch_size=args.batch_size,
             shuffle=True,
             num_workers=max(1, args.cpu_num//2),
@@ -271,6 +291,7 @@ def main(args):
         )
 
         train_iterator = BidirectionalOneShotIterator(train_dataloader_head, train_dataloader_tail)
+
 
         # Set training configuration
         current_learning_rate = args.learning_rate
@@ -317,10 +338,12 @@ def main(args):
         training_logs = []
 
         max_mrr = 0             # wandb variable
-        epochTime = time.time()
+        step_time = datetime.datetime.now()
+        step_time_list = []
         #Training Loop
         for step in range(init_step, args.max_steps):
             log = kge_model.train_step(kge_model, optimizer, train_iterator, args)
+
             training_logs.append(log)
 
             if step >= warm_up_steps:
@@ -354,6 +377,9 @@ def main(args):
 
             if args.do_valid and step % args.valid_steps == 0:
                 # print(f'time for {args.valid_steps} epochs: {str(timedelta(seconds=(time.time() - epochTime)))}')
+                step_time_delta = datetime.datetime.now() - step_time
+                step_time_list.append(str(step_time_delta))
+                print(f'Time for {args.valid_steps} steps: {step_time_delta}')
                 valTime = time.time()
                 logging.info('Evaluating on Valid Dataset...')
                 metrics = kge_model.test_step(kge_model, valid_triples, all_true_triples, args)
@@ -366,13 +392,17 @@ def main(args):
                     'mr': metrics['MR'],
                     'hits@1': metrics['HITS@1'],
                     'hits@3': metrics['HITS@3'],
-                    'hits@10': metrics['HITS@10']},
+                    'hits@10': metrics['HITS@10'],
+                    'auc_pr': metrics['auc_pr'],
+                    'auc_roc': metrics['auc_roc'],
+                    'avg_precision': metrics['avg_precision']},
                           step=step)
                 epochTime = time.time()
 
                 # print(f'val time: {str(timedelta(seconds=(time.time() - valTime)))}')
 
         print(f'train time: {str(timedelta(seconds=(time.time() - startTime)))}')
+        print(step_time_list)
 
         save_variable_list = {
             'step': step,
@@ -386,11 +416,14 @@ def main(args):
         metrics = kge_model.test_step(kge_model, valid_triples, all_true_triples, args)
         log_metrics('Valid', step, metrics)
         wandb.log(data={
-                    'mrr': metrics['MRR'],
-                    'mr': metrics['MR'],
-                    'hits@1': metrics['HITS@1'],
-                    'hits@3': metrics['HITS@3'],
-                    'hits@10': metrics['HITS@10']},
+            'mrr': metrics['MRR'],
+            'mr': metrics['MR'],
+            'hits@1': metrics['HITS@1'],
+            'hits@3': metrics['HITS@3'],
+            'hits@10': metrics['HITS@10'],
+            'auc_pr': metrics['auc_pr'],
+            'auc_roc': metrics['auc_roc'],
+            'avg_precision': metrics['avg_precision']},
                           step=step)
 
     if args.do_test:
@@ -398,11 +431,14 @@ def main(args):
         metrics = kge_model.test_step(kge_model, test_triples, all_true_triples, args)
         log_metrics('Test', step, metrics)
         wandb.log(data={
-                    'test_mrr': metrics['MRR'],
-                    'test_mr': metrics['MR'],
-                    'test_hits@1': metrics['HITS@1'],
-                    'test_hits@3': metrics['HITS@3'],
-                    'test_hits@10': metrics['HITS@10']},
+            'test_mrr': metrics['MRR'],
+            'test_mr': metrics['MR'],
+            'test_hits@1': metrics['HITS@1'],
+            'test_hits@3': metrics['HITS@3'],
+            'test_hits@10': metrics['HITS@10'],
+            'auc_pr': metrics['auc_pr'],
+            'auc_roc': metrics['auc_roc'],
+            'avg_precision': metrics['avg_precision']},
                           step=step)
 
     if args.evaluate_train:
