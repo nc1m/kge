@@ -1,7 +1,0 @@
-hsa:5914	interacts_with	D01132
-hsa:6257	interacts_with	D01132
-hsa:6257	interacts_with	D00316
-hsa:6256	interacts_with	D01132
-hsa:367	interacts_with	D00585
-hsa:5915	interacts_with	D00094
-hsa:6256	interacts_with	D00094
