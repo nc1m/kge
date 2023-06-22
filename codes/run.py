@@ -379,6 +379,7 @@ def main(args):
                 # print(f'time for {args.valid_steps} epochs: {str(timedelta(seconds=(time.time() - epochTime)))}')
                 step_time_delta = datetime.datetime.now() - step_time
                 step_time_list.append(str(step_time_delta))
+                step_time = datetime.datetime.now()
                 print(f'Time for {args.valid_steps} steps: {step_time_delta}')
                 valTime = time.time()
                 logging.info('Evaluating on Valid Dataset...')
