@@ -20,6 +20,8 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('data_path', type=Path, help='Path to dataset dir.')
+    parser.add_argument('-s', action='store_true', help='Set to store metadate in data_path/metadata.json.')
+    parser.add_argument('-f', action='store_true', help='Set to NOT add reverse edges')
     parser.add_argument('--mode', default='jaccard', type=str,
                         choices=const.EGO_NETWORK_MODES, help='Choos the set metric.')
     parser.add_argument('--check', '-c', action='store_true', help='Check if triple are true negatives.')
@@ -143,9 +145,11 @@ def main(args):
     tensor_heads = torch.tensor(triple_df["head"])
     tensor_tails = torch.tensor(triple_df["tail"])
     tensor_relations = torch.tensor(triple_df['relation'])
-    # tensor_triples = torch.stack([tensor_heads, tensor_relations, tensor_tails], dim=1)
-    # add inverse triples
-    tensor_triples = torch.cat((torch.stack([tensor_heads, tensor_relations, tensor_tails], dim=1), torch.stack([tensor_tails, tensor_relations, tensor_heads], dim=1)), dim=0)
+    if args.f:
+        tensor_triples = torch.stack([tensor_heads, tensor_relations, tensor_tails], dim=1)
+    else:
+        # add inverse triples
+        tensor_triples = torch.cat((torch.stack([tensor_heads, tensor_relations, tensor_tails], dim=1), torch.stack([tensor_tails, tensor_relations, tensor_heads], dim=1)), dim=0)
 
     print("triples are converted in a tensor form")
     neighbor_sets = find_neighbor_sets(tensor_triples, nentity)
@@ -179,12 +183,18 @@ def main(args):
 
     # /data/yamanishi/processed/enzyme/1/
     # /data/yamanishi/processed/enzyme/metadata.json
-    output_path = args.data_path.parents[0].joinpath('metadata.json')
+    if args.s:
+        output_path = args.data_path.joinpath('metadata.json')
+    else:
+        output_path = args.data_path.parents[0].joinpath('metadata.json')
 
     # load existing data
-    with open(output_path, mode='r') as json_fp:
-        metadata = json.load(json_fp)
-        # print(metadata)
+    if output_path.exists():
+        with open(output_path, mode='r') as json_fp:
+            metadata = json.load(json_fp)
+            # print(metadata)
+    else:
+        metadata = dict()
 
     # append metadata
     if 'ego_networks' not in metadata:
