@@ -24,6 +24,25 @@ class TrainDataset(Dataset):
         self.count = self.count_frequency(triples)
         self.true_head, self.true_tail = self.get_true_head_and_tail(self.triples)
         self.ego_network_data = ego_network_data
+        if self.ego_network_data is not None:
+            self.true_neg_samples_head, self.true_neg_samples_tail = self.get_true_neg_samples(self.triples, self.ego_network_data, self.true_head, self.true_tail)
+
+    @staticmethod
+    def get_true_neg_samples(triples, ego_network_data, true_head, true_tail):
+        true_neg_samples_head = {}
+        true_neg_samples_tail = {}
+        for head, relation, tail in triples:
+            head_corruption_candidates = ego_network_data[str(head)]
+            t_heads = true_head[(relation, tail)]
+
+            tail_corruption_candidates = ego_network_data[str(tail)]
+            t_tails = true_tail[(head, relation)]
+
+            true_neg_samples_head[(head, relation, tail)] = [(val, key) for [val, key] in head_corruption_candidates if val not in t_heads]
+
+            true_neg_samples_tail[(head, relation, tail)] = [(val, key) for [val, key] in tail_corruption_candidates if val not in t_tails]
+
+        return true_neg_samples_head, true_neg_samples_tail
 
 
     def __len__(self):
@@ -43,9 +62,9 @@ class TrainDataset(Dataset):
 
         if self.ego_network_data is not None:
             if self.mode == "tail-batch":
-                ego_network_candidates = copy.deepcopy(self.ego_network_data[str(tail)])
+                ego_network_candidates = self.true_neg_samples_tail[(head, relation, tail)] # copy.deepcopy(self.ego_network_data[str(tail)])
             elif self.mode == "head-batch":
-                ego_network_candidates = copy.deepcopy(self.ego_network_data[str(head)])
+                ego_network_candidates = self.true_neg_samples_head[(head, relation, tail)] # copy.deepcopy(self.ego_network_data[str(head)])
 
         while negative_sample_size < self.negative_sample_size:
             negative_sample = np.random.randint(self.nentity, size=self.negative_sample_size*2)
@@ -60,6 +79,7 @@ class TrainDataset(Dataset):
                     hard_negatives_selected = np.random.choice(ents, len(ents), p=scores_probs)
                     #print('hard_negatives:', hard_negatives_selected.shape)
                     #print('unique hard_negatives:', np.unique(hard_negatives_selected).shape)
+                    # print(len(hard_negatives_selected))
                     if len(negative_sample) > len(hard_negatives_selected):
                         negative_sample[:len(hard_negatives_selected)] = hard_negatives_selected
                     else:
@@ -69,23 +89,25 @@ class TrainDataset(Dataset):
                 mask = np.in1d(
                     negative_sample,
                     self.true_head[(relation, tail)],
-                    assume_unique=True,
+                    assume_unique=False,
                     invert=True
                 )
             elif self.mode == 'tail-batch':
                 mask = np.in1d(
                     negative_sample,
                     self.true_tail[(head, relation)],
-                    assume_unique=True,
+                    assume_unique=False,
                     invert=True
                 )
             else:
                 raise ValueError('Training batch mode %s not supported' % self.mode)
-            # print(f'Number of true negatives found: {mask.sum()}')
-            # print(ego_network_candidates)
-            if self.ego_network_data is not None:
-                ego_network_candidates = self.filter_candidates(ego_network_candidates, negative_sample[~mask])
-            # print(ego_network_candidates)
+            # print(f'Number of true negatives found: {mask.sum()}', self.mode)
+            # print('\n')
+            # print(len(ego_network_candidates), self.mode)
+            # if self.ego_network_data is not None:
+            #     ego_network_candidates = self.filter_candidates(ego_network_candidates, negative_sample[~mask])
+            # print(len(ego_network_candidates), self.mode)
+            # print('\n')
             negative_sample = negative_sample[mask]
             negative_sample_list.append(negative_sample)
             negative_sample_size += negative_sample.size
