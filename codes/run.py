@@ -78,7 +78,10 @@ def parse_args(args=None):
     parser.add_argument('--seed', type=int, default=None, help='Randomgenerator seed for reproducibility.')
     parser.add_argument('--offline', action='store_true', help='Set if you do not want to sync to wandb.')
     parser.add_argument('--neg_sampling_method', default='uniform', type=str, choices=const.NEGATIVE_SAMPLING_METHODS, help='Choose how the negative samples are sampled for the auc score metric.')
+    parser.add_argument('--eval_neg_sampling_method', default='jaccard', type=str, choices=const.NEGATIVE_SAMPLING_METHODS, help='Choose how the negative samples are sampled for the auc score metric.')
     parser.add_argument('--metadata_path', default=None, type=str, help='Path to the metainformation used for type/simiarity based sampling')
+    parser.add_argument('--wandb_project', type=str, default=None)
+    parser.add_argument('--wandb_entity', type=str, default=None)
 
     return parser.parse_args(args)
 
@@ -449,5 +452,5 @@ def main(args):
 
 if __name__ == '__main__':
     args = parse_args()
-    wandb.init(mode='offline' if args.offline else 'online')
+    wandb.init(entity=args.wandb_entity, project=args.wandb_project, mode='offline' if args.offline else 'online')
     main(args)

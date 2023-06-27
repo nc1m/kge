@@ -466,7 +466,7 @@ class KGEModel(nn.Module):
                     entity2id[entity] = int(eid)
                     id2entity[int(eid)] = entity
 
-            samples, gt = append_negative_samples(test_triples, all_true_triples, similarityData, id2entity, entity2id, 5, args.neg_sampling_method, seed=42)
+            samples, gt = append_negative_samples(test_triples, all_true_triples, similarityData, id2entity, entity2id, 5, args.eval_neg_sampling_method, seed=42)
             samples = torch.LongTensor(samples)
 
             if args.cuda:
