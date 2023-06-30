@@ -9,39 +9,15 @@ import json
 import logging
 import os
 import datetime
-import time
 from pathlib import Path
 
-
-
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 import numpy as np
-import torch
-import wandb
-from sklearn.metrics import roc_curve
-from sklearn.metrics import precision_recall_curve
-from sklearn.metrics import auc
-from sklearn.metrics import RocCurveDisplay
-from sklearn.metrics import PrecisionRecallDisplay
-# from sklearn.metrics import roc_auc_score
-from sklearn.metrics import average_precision_score
-from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.neural_network import MLPClassifier
-import xgboost as xgb
-
 import pandas as pd
 
-from model import append_negative_samples
 from model import KGEModel
-import const
 from dataloader import TestDataset
 
 def parse_args(args=None):
@@ -54,7 +30,6 @@ def parse_args(args=None):
     parser.add_argument('-cpu', '--cpu_num', default=10, type=int)
     parser.add_argument('-k', '--top_k', type=int, default=20, help='Number of top k ranks saved.')
     return parser.parse_args(args)
-
 
 
 def read_triple(file_path, entity2id, relation2id):
