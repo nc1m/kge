@@ -502,26 +502,24 @@ def get_entity_type(entity, similarityData):
     """
     Returns the type of the entity and if it's a drug.
     """
-    isTarget = True
-    if entity.startswith('D'):
-        isTarget = False
     for eType in TARGET_TYPES:
-        allEntities = similarityData[eType]['target' if isTarget else 'drug']['index']
+        allEntities = similarityData[eType]['target']['index']
         if entity in allEntities:
-            return eType, isTarget
+            return eType
     assert False, f'entity type not found'
 
 
-def get_negative_sample_entity(entity2corrupt, rng, similarityData, negative_sampling_method, entity2id):
+def get_negative_sample_entity(entity2corrupt, rng, similarityData, negative_sampling_method, entity2id, eType):
     """
     Returns either a random entity emb id based on uniform/type based sampling
     or a list of entity emb ids sorted by similarity
     or a list of entity emb ids sorted by ego network similarity
     """
+    isTarget = False if entity2corrupt.startswith('D') else True
+
     if negative_sampling_method == const.NEGATIVE_SAMPLING_METHOD_UNIFORM:
         return rng.integers(0, max(entity2id.values()))
     elif negative_sampling_method == const.NEGATIVE_SAMPLING_METHOD_TYPE:
-        eType, isTarget = get_entity_type(entity2corrupt, similarityData)
         allEntities = similarityData[eType]['target' if isTarget else 'drug']['index']
         rEntity = rng.integers(0, len(allEntities))
         rEntity = allEntities[rEntity]
@@ -531,7 +529,6 @@ def get_negative_sample_entity(entity2corrupt, rng, similarityData, negative_sam
         if entity2corrupt in __similarity_cache__:
             return __similarity_cache__[entity2corrupt]
         else:
-            eType, isTarget = get_entity_type(entity2corrupt, similarityData)
             index = similarityData[eType]['target' if isTarget else 'drug']['index']
             simMat = np.array(similarityData[eType]['target' if isTarget else 'drug']['similarity_matrix'])
             eIndex = index.index(entity2corrupt) # index from target as str to target index in similarty matrix
@@ -559,6 +556,9 @@ def append_negative_samples(positive_triples, all_true_triples, similarityData, 
     for head, relation, tail in positive_triples:
         samples.append((head, relation, tail))
         gt.append(1)
+
+        # Doing this with head since it's a target and targets are unique in their type, while drugs can appear in multilpe datasets.
+        eType = get_entity_type(id2entity[head], similarityData)
         for _ in range(k):
             if rng.random() < 0.5:
                 headCorruption = True
@@ -566,10 +566,10 @@ def append_negative_samples(positive_triples, all_true_triples, similarityData, 
                 headCorruption = False
 
             if headCorruption:
-                rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, negative_sampling_method, entity2id)
+                rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, negative_sampling_method, entity2id, eType)
                 if negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_UNIFORM, const.NEGATIVE_SAMPLING_METHOD_TYPE]:
                     while (rEntity, relation, tail) in all_true_triples or (rEntity, relation, tail) in samples:
-                        rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, negative_sampling_method, entity2id)
+                        rEntity = get_negative_sample_entity(id2entity[head], rng, similarityData, negative_sampling_method, entity2id, eType)
                     samples.append((rEntity, relation, tail))
                     gt.append(0)
                 elif negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_SIMILARITY, const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_COUNT, const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_JACCARD]:
@@ -580,10 +580,10 @@ def append_negative_samples(positive_triples, all_true_triples, similarityData, 
                             break
 
             else:
-                rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, negative_sampling_method, entity2id)
+                rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, negative_sampling_method, entity2id, eType)
                 if negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_UNIFORM, const.NEGATIVE_SAMPLING_METHOD_TYPE]:
                     while (head, relation, rEntity) in all_true_triples or (head, relation, rEntity) in samples:
-                        rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, negative_sampling_method, entity2id)
+                        rEntity = get_negative_sample_entity(id2entity[tail], rng, similarityData, negative_sampling_method, entity2id, eType)
                     samples.append((head, relation, rEntity))
                     gt.append(0)
                 elif negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_SIMILARITY, const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_COUNT, const.NEGATIVE_SAMPLING_METHOD_EGO_NETWORK_JACCARD]:
