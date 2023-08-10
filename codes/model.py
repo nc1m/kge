@@ -558,7 +558,10 @@ def append_negative_samples(positive_triples, all_true_triples, similarityData, 
         gt.append(1)
 
         # Doing this with head since it's a target and targets are unique in their type, while drugs can appear in multilpe datasets.
-        eType = get_entity_type(id2entity[head], similarityData)
+        if negative_sampling_method in [const.NEGATIVE_SAMPLING_METHOD_TYPE, const.NEGATIVE_SAMPLING_METHOD_SIMILARITY]:
+            eType = get_entity_type(id2entity[head], similarityData)
+        else:
+            eType = None
         for _ in range(k):
             if rng.random() < 0.5:
                 headCorruption = True

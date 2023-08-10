@@ -11,6 +11,7 @@ import os
 import datetime
 import time
 from pathlib import Path
+import sys
 
 import numpy as np
 import torch
@@ -56,6 +57,9 @@ def parse_args(args=None):
     parser.add_argument('--eval_neg_sample_ratio', type=int, default=5, help='Numbe of negative samples per positive validation/test sample.')
     parser.add_argument('--scale_emb', action='store_true', help='Scale (using standard scalar) the embeddings before handing them to the classifiers.')
     parser.add_argument('--svc_prob', action='store_true', help='If set enable probability estimates for svc, but will slow down the training.')
+    parser.add_argument('--no_clf', action='store_true', help='If set skip classifier training/evaluation.')
+    parser.add_argument('--wandb_project', type=str, default=None)
+    parser.add_argument('--wandb_entity', type=str, default=None)
 
 
     return parser.parse_args(args)
@@ -213,10 +217,14 @@ def main(args):
         else:
             valid_path = Path(args.data_path).parents[0].joinpath('kegg_interactions.txt')
         valid_triples = read_triple(valid_path, entity2id, relation2id)
+
+        # add validation set to test set so they are in all_true_triples and filtered in negative sampling
+        test_triples = read_triple(os.path.join(args.data_path, 'valid.txt'), entity2id, relation2id)
+        test_triples = test_triples + read_triple(os.path.join(args.data_path, 'test.txt'), entity2id, relation2id)
     else:
         valid_triples = read_triple(os.path.join(args.data_path, 'valid.txt'), entity2id, relation2id)
+        test_triples = read_triple(os.path.join(args.data_path, 'test.txt'), entity2id, relation2id)
     logging.info('#valid: %d' % len(valid_triples))
-    test_triples = read_triple(os.path.join(args.data_path, 'test.txt'), entity2id, relation2id)
     logging.info('#test: %d' % len(test_triples))
 
 
@@ -290,6 +298,9 @@ def main(args):
                'kge/pr_auc': pr_auc})
 
 
+    if args.no_clf:
+        sys.exit()
+
     # Create classifier train data
     samplesTrain, gtTrain = append_negative_samples(train_triples, all_true_triples, similarityData, id2entity, entity2id, args.eval_neg_sample_ratio, args.auc_sampling, seed=args.seed)
     samplesTrain = build_classifier_dataset(kge_model, samplesTrain)
@@ -349,5 +360,5 @@ def main(args):
 
 if __name__ == '__main__':
     args = parse_args()
-    wandb.init(project='yamanishi_paper_eval', entity='l3s-future-lab', mode='offline' if args.offline else 'online')
+    wandb.init(entity=args.wandb_entity if args.wandb_entity else 'l3s-future-lab', project=args.wandb_project, mode='offline' if args.offline else 'online')
     main(args)
