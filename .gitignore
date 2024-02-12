@@ -1,5 +1,14 @@
 data/
 models/
+ego_network_hpo_*
+enzyme_jaccard_sweep_*
+run_sbatch_*
+yamanishi_external_kegg_*
+yamanishi_paper_sweep_*
+yamanishi_raw_eval_*
+wandb*
+data_k_fold/
+telman_*
 
 # emacs backup files
 *~
